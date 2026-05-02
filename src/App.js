@@ -117,8 +117,7 @@ function generateQuestion(streak, mode) {
   else if (diff === 3) pool = templates.slice(4, 13);
   else pool = templates.slice(7);
 
-  // Mode bias
-  if (mode === "accuracy") pool = pool.concat(pool); // pure accuracy, any
+  if (mode === "accuracy") pool = pool.concat(pool);
   
   let q = pool[rand(0, pool.length - 1)]();
   if (q._compute) q = q._val;
@@ -407,6 +406,26 @@ function GameScreen({ settings, onEnd, stats, setStats }) {
   const streakRef = useRef(0);
   const attemptsRef = useRef({ total: stats.totalAttempts, correct: stats.totalCorrect });
 
+  // ── AUTOFOCUS: keep the input focused whenever feedback clears ──────────────
+  // We use a global keydown listener so even if the input loses focus
+  // (e.g. user accidentally clicks elsewhere), any digit/minus key
+  // snaps focus back and types into the field immediately.
+  useEffect(() => {
+    const handleGlobalKey = (e) => {
+      // Don't steal focus if the user is typing in a different intentional element
+      if (e.target !== inputRef.current) {
+        // Only redirect digit/backspace/minus keypresses
+        if (/^[0-9\-]$/.test(e.key) || e.key === "Backspace") {
+          if (inputRef.current && !inputRef.current.disabled) {
+            inputRef.current.focus();
+          }
+        }
+      }
+    };
+    window.addEventListener("keydown", handleGlobalKey);
+    return () => window.removeEventListener("keydown", handleGlobalKey);
+  }, []);
+
   // Sound helpers
   const playTone = useCallback((freq, dur, type = "sine", vol = 0.12) => {
     if (!settings.sound) return;
@@ -452,7 +471,10 @@ function GameScreen({ settings, onEnd, stats, setStats }) {
       setMotiveLine(MOTIVATIONAL[Math.floor(Math.random() * MOTIVATIONAL.length)]);
       setQuestionAnim("in");
       startTimer(dur);
-      if (inputRef.current) inputRef.current.focus();
+      // Restore focus after state updates flush
+      requestAnimationFrame(() => {
+        if (inputRef.current) inputRef.current.focus();
+      });
     }, 220);
   }, [settings, startTimer]);
 
@@ -466,11 +488,15 @@ function GameScreen({ settings, onEnd, stats, setStats }) {
     setTimeout(() => loadNextQuestion(0), 700);
   }, [playTone, loadNextQuestion, setStats]);
 
+  // Mount: autofocus immediately
   useEffect(() => {
     const dur = getTimerDuration(0, settings.timerSpeed);
     setTimerDuration(dur);
     startTimer(dur);
-    if (inputRef.current) inputRef.current.focus();
+    // Small delay to let the component fully render before focusing
+    requestAnimationFrame(() => {
+      if (inputRef.current) inputRef.current.focus();
+    });
     return () => clearInterval(timerRef.current);
   }, []);
 
@@ -611,10 +637,17 @@ function GameScreen({ settings, onEnd, stats, setStats }) {
         <div style={{ position: "relative", marginBottom: 16 }}>
           <input
             ref={inputRef}
+            autoFocus
             type="number"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKey}
+            // Re-grab focus if user accidentally clicks away
+            onBlur={() => {
+              if (inputRef.current && !inputRef.current.disabled) {
+                requestAnimationFrame(() => inputRef.current?.focus());
+              }
+            }}
             placeholder="?"
             style={{
               width: "100%",
